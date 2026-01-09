@@ -31,7 +31,14 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+| Principle | Verification | Status |
+|-----------|--------------|--------|
+| I. Hexagonal Architecture | Domain layer has no framework dependencies? Ports defined in application layer? | ☐ |
+| II. Domain-Driven Design | Ubiquitous language used? Aggregates identified? Repository interfaces defined? | ☐ |
+| III. SOLID Principles | Single responsibility per class? Dependencies injected via interfaces? | ☐ |
+| IV. Test-Driven Development | Tests written before implementation? Red-Green-Refactor followed? | ☐ |
+| V. Behavior-Driven Development | Acceptance criteria in Given/When/Then? Scenarios executable? | ☐ |
+| VI. Code Quality Standards | Linting configured? Coverage targets defined? Complexity limits enforced? | ☐ |
 
 ## Project Structure
 
