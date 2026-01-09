@@ -2,6 +2,43 @@
 
 基於六角形架構 (Hexagonal Architecture) 的 RESTful API 聯絡人管理系統，具備完整的 CRUD 操作與 Domain Events 自動稽核日誌功能。
 
+---
+
+## 分支說明
+
+> **當前分支: `main`** - 使用 Domain Events 實作稽核機制（推薦）
+
+本專案有兩個主要分支，分別展示不同的稽核架構實作方式：
+
+| 分支 | 稽核機制 | 說明 |
+|------|----------|------|
+| **`main`** (此分支) | Domain Events | 使用領域事件 + `@TransactionalEventListener` |
+| [`aop4audit`](https://github.com/ChunPingWang/aop-poc/tree/aop4audit) | Spring AOP | 使用 `@Auditable` 註解 + `AuditAspect` 攔截 |
+
+### 兩種方式比較
+
+| 比較項目 | Domain Events 方式 (此分支) | AOP 方式 (aop4audit) |
+|---------|---------------------------|---------------------|
+| **架構正確性** | ✅ 符合六角形架構依賴規則 | ⚠️ Application 依賴 Infrastructure |
+| **耦合程度** | Service 完全不知道稽核存在 | Service 需標註 `@Auditable` |
+| **資料記錄** | 業務層資訊 (before/after snapshot) | HTTP 層資訊 (endpoint, IP, userAgent) |
+| **可測試性** | 輕鬆 Mock EventPublisher | 需處理 AOP 代理 |
+| **擴展性** | 新增 EventListener | 修改 Aspect |
+| **實作複雜度** | 較高，需定義事件類別 | 較低，快速上手 |
+| **適用場景** | 大型專案、嚴格架構 | 快速原型、簡單專案 |
+
+### 切換分支
+
+```bash
+# 切換到 AOP 版本
+git checkout aop4audit
+
+# 切換回 Domain Events 版本 (此分支)
+git checkout main
+```
+
+---
+
 ## 專案狀態
 
 | 項目 | 狀態 |
