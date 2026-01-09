@@ -4,8 +4,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 2.0 |
 | 建立日期 | 2026-01-09 |
+| 更新日期 | 2026-01-10 |
 | 產品名稱 | Contact Management System |
 | 專案代號 | CMS-2026 |
 
@@ -78,9 +79,10 @@
 
 | 項目 | 說明 |
 |------|------|
-| 功能描述 | 自動記錄所有 API 呼叫的稽核資訊 |
-| 記錄時機 | 每次 API 被呼叫時自動觸發 |
-| 記錄內容 | 操作時間、操作類型、API 端點、請求參數、回應狀態、執行時間、操作者 IP |
+| 功能描述 | 自動記錄所有資料變更操作的稽核資訊 |
+| 記錄時機 | 資料新增/修改/刪除時自動觸發（透過 Domain Events） |
+| 記錄內容 | 操作時間、操作類型、關聯資料 ID、操作前快照、操作後快照 |
+| 設計原則 | 稽核機制與業務邏輯完全解耦，不影響核心業務程式碼 |
 
 #### 3.2.2 稽核日誌查詢
 
@@ -89,9 +91,8 @@
 | 查詢方式 | 說明 | 使用場景 |
 |----------|------|----------|
 | 依時間範圍查詢 | 查詢指定時間區間內的日誌 | 定期稽核報告、問題調查 |
-| 依操作類型查詢 | 查詢特定操作（CREATE/READ/UPDATE/DELETE）的日誌 | 追蹤特定類型操作 |
-| 依 API 端點查詢 | 查詢特定 API 的呼叫記錄 | API 使用分析 |
-| 依操作者 IP 查詢 | 查詢特定來源 IP 的操作記錄 | 安全稽核、異常追蹤 |
+| 依操作類型查詢 | 查詢特定操作（CREATE/UPDATE/DELETE）的日誌 | 追蹤特定類型操作 |
+| 依聯絡人 ID 查詢 | 查詢特定聯絡人的所有變更歷史 | 資料變更追蹤 |
 | 綜合條件查詢 | 組合多個條件進行查詢 | 複雜稽核需求 |
 
 ### 3.3 資料庫管理介面
@@ -119,18 +120,34 @@
 
 ### 4.2 稽核日誌資料模型
 
+採用 Domain Events 架構，記錄資料變更前後的完整快照：
+
 | 欄位名稱 | 欄位說明 | 資料類型 |
 |----------|----------|----------|
 | id | 日誌識別碼 | Long |
-| timestamp | 操作時間 | DateTime |
-| action | 操作類型 | String (CREATE/READ/UPDATE/DELETE) |
-| endpoint | API 端點 | String |
-| method | HTTP 方法 | String (GET/POST/PUT/DELETE) |
-| requestBody | 請求內容 | String (JSON) |
-| responseStatus | 回應狀態碼 | Integer |
-| executionTime | 執行時間（毫秒） | Long |
-| clientIp | 操作者 IP | String |
-| userAgent | 用戶代理 | String |
+| contactId | 關聯的聯絡人 ID | Long |
+| operationType | 操作類型 | String (CREATE/UPDATE/DELETE) |
+| beforeData | 操作前資料快照 | String (JSON) |
+| afterData | 操作後資料快照 | String (JSON) |
+| createdAt | 日誌建立時間 | DateTime |
+
+#### 操作類型對應的資料快照
+
+| 操作類型 | beforeData | afterData |
+|----------|------------|-----------|
+| CREATE | null | 新建資料的完整快照 |
+| UPDATE | 更新前的資料快照 | 更新後的資料快照 |
+| DELETE | 刪除前的資料快照 | null |
+
+#### 快照資料格式範例
+
+```json
+{
+  "name": "張三",
+  "phone": "0912345678",
+  "address": "台北市中正區"
+}
+```
 
 ---
 
@@ -260,9 +277,8 @@
 |------|-------------|------|
 | 查詢所有日誌 | GET | /api/audit-logs |
 | 依時間範圍查詢 | GET | /api/audit-logs?startTime={}&endTime={} |
-| 依操作類型查詢 | GET | /api/audit-logs?action={action} |
-| 依 API 端點查詢 | GET | /api/audit-logs?endpoint={endpoint} |
-| 依 IP 查詢 | GET | /api/audit-logs?clientIp={ip} |
+| 依操作類型查詢 | GET | /api/audit-logs?operationType={type} |
+| 依聯絡人 ID 查詢 | GET | /api/audit-logs?contactId={id} |
 | 查詢單一日誌 | GET | /api/audit-logs/{id} |
 
 ---

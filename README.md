@@ -1,6 +1,6 @@
 # 聯絡人管理系統 (Contact Management System)
 
-基於六角形架構 (Hexagonal Architecture) 的 RESTful API 聯絡人管理系統，具備完整的 CRUD 操作與 AOP 自動稽核日誌功能。
+基於六角形架構 (Hexagonal Architecture) 的 RESTful API 聯絡人管理系統，具備完整的 CRUD 操作與 Domain Events 自動稽核日誌功能。
 
 ## 專案狀態
 
@@ -17,7 +17,7 @@
 - [x] **US2**: 查詢聯絡人 - GET /api/contacts, GET /api/contacts/{id}
 - [x] **US3**: 修改聯絡人 - PUT /api/contacts/{id}
 - [x] **US4**: 刪除聯絡人 - DELETE /api/contacts/{id}
-- [x] **US5**: 稽核日誌自動記錄 - AOP 自動攔截
+- [x] **US5**: 稽核日誌自動記錄 - Domain Events 自動處理
 - [x] **US6**: 稽核日誌查詢 - GET /api/audit-logs
 - [x] **US7**: H2 資料庫管理介面
 
@@ -28,7 +28,7 @@
 | Java | 17 | 程式語言 |
 | Spring Boot | 3.2.0 | 應用框架 |
 | Spring Data JPA | 3.2.0 | 資料存取 |
-| Spring AOP | 3.2.0 | 切面程式設計 |
+| Spring Events | 3.2.0 | 領域事件發布 |
 | H2 Database | - | 開發環境資料庫 |
 | PostgreSQL | - | 生產環境資料庫 |
 | Cucumber | 7.15.0 | BDD 測試 |
@@ -36,6 +36,41 @@
 | Gradle | 8.5 | 建置工具 |
 
 ## 系統架構
+
+### 架構依賴規則
+
+本專案嚴格遵循六角形架構的依賴規則：
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                        依賴方向規則                                │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   Infrastructure Layer  ─────────────►  Application Layer         │
+│          (可以依賴)                          (被依賴)              │
+│                                                                   │
+│   Application Layer     ─────────────►  Domain Layer              │
+│          (可以依賴)                          (被依賴)              │
+│                                                                   │
+│   ✗ Application Layer   ──────X──────►  Infrastructure Layer      │
+│          (禁止依賴)                                                │
+│                                                                   │
+│   ✗ Domain Layer        ──────X──────►  Application Layer         │
+│          (禁止依賴)                                                │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+**核心原則**:
+1. **Domain Layer** 為核心，不依賴任何外層
+2. **Application Layer** 只依賴 Domain Layer，透過 Output Port (Interface) 與 Infrastructure 互動
+3. **Infrastructure Layer** 可依賴 Application Layer 和 Domain Layer
+4. 使用 **依賴反轉 (Dependency Inversion)** 確保內層不依賴外層
+
+**實作方式**:
+- Application Layer 定義 Output Port（如 `ContactRepository`、`DomainEventPublisher`）
+- Infrastructure Layer 提供實作（如 `ContactJpaAdapter`、`SpringDomainEventPublisher`）
+- 透過 Spring DI 在執行時綁定
 
 ### 六角形架構 (Hexagonal Architecture)
 
@@ -51,7 +86,9 @@ graph TB
             DB[(Database<br/>H2 / PostgreSQL)]
         end
 
-        AOP["AOP Aspect<br/>AuditAspect"]
+        subgraph "Event Infrastructure"
+            EVT["SpringDomainEventPublisher<br/>AuditEventListener"]
+        end
     end
 
     subgraph "Application Layer"
@@ -68,12 +105,14 @@ graph TB
         subgraph "Output Ports"
             RP1["ContactRepository"]
             RP2["AuditLogRepository"]
+            EP["DomainEventPublisher"]
         end
     end
 
     subgraph "Domain Layer"
         ENT["Entities<br/>Contact<br/>AuditLog"]
         VO["Value Objects<br/>ContactId<br/>OperationType"]
+        EVE["Domain Events<br/>ContactCreatedEvent<br/>ContactUpdatedEvent"]
         EXC["Exceptions<br/>ContactNotFoundException<br/>ValidationException"]
     end
 
@@ -91,11 +130,13 @@ graph TB
 
     SVC --> RP1
     SVC --> RP2
+    SVC --> EP
     SVC --> ENT
     SVC --> VO
+    SVC --> EVE
 
-    AOP -.-> SVC
-    AOP --> RP2
+    EP -.->|implements| EVT
+    EVT --> RP2
 
     RP1 --> JPA
     RP2 --> JPA
@@ -105,6 +146,7 @@ graph TB
     style JPA fill:#87CEEB
     style SVC fill:#FFB6C1
     style ENT fill:#DDA0DD
+    style EVT fill:#F0E68C
 ```
 
 ### 套件結構圖
@@ -139,8 +181,9 @@ graph TD
                     MAPPER["Mappers"]
                 end
             end
-            subgraph "aspect"
-                ASPECT["AuditAspect"]
+            subgraph "event"
+                EVTPUB["SpringDomainEventPublisher"]
+                EVTLIS["AuditEventListener"]
             end
             subgraph "config"
                 CONFIG["Configurations"]
@@ -161,8 +204,9 @@ graph TD
     REPO --> MAPPER
     MAPPER --> DM
 
-    ASPECT --> PO
-    ASPECT --> AS
+    AS --> EVTPUB
+    EVTPUB --> EVTLIS
+    EVTLIS --> REPO
 ```
 
 ### 請求處理流程
@@ -171,24 +215,27 @@ graph TD
 sequenceDiagram
     participant Client
     participant Controller
-    participant AuditAspect
     participant Service
+    participant EventPublisher
+    participant AuditListener
     participant Repository
     participant Database
 
     Client->>Controller: HTTP Request
     Controller->>Service: UseCase Method
 
-    Note over AuditAspect: @Around 攔截
-    AuditAspect->>AuditAspect: 記錄 Before State
-
-    Service->>Repository: Data Operation
-    Repository->>Database: SQL Query
+    Note over Service: 執行業務邏輯
+    Service->>Repository: save(contact)
+    Repository->>Database: INSERT contacts
     Database-->>Repository: Result
     Repository-->>Service: Domain Entity
 
-    AuditAspect->>AuditAspect: 記錄 After State
-    AuditAspect->>Repository: Save AuditLog
+    Note over Service: 發布領域事件
+    Service->>EventPublisher: publish(ContactCreatedEvent)
+    EventPublisher->>AuditListener: onContactCreated()
+
+    Note over AuditListener: @TransactionalEventListener
+    AuditListener->>Repository: save(auditLog)
     Repository->>Database: INSERT audit_logs
 
     Service-->>Controller: Domain Entity

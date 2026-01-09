@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 2.0 |
 | 建立日期 | 2026-01-09 |
 | 對應 PRD 版本 | 1.0 |
 | 技術架構師 | - |
@@ -13,7 +13,32 @@
 
 ## 2. 技術架構概覽
 
-### 2.1 系統架構圖
+### 2.1 架構依賴規則
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      依賴方向規則                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Infrastructure Layer  ───────────►  Application Layer         │
+│          (可以依賴)                        (被依賴)              │
+│                                                                 │
+│   Application Layer     ───────────►  Domain Layer              │
+│          (可以依賴)                        (被依賴)              │
+│                                                                 │
+│   ✗ Application Layer   ─────X─────►  Infrastructure Layer      │
+│          (禁止依賴)                                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+規則說明：
+1. Domain Layer 為核心，不依賴任何外層
+2. Application Layer 只依賴 Domain Layer
+3. Infrastructure Layer 可依賴 Application Layer 和 Domain Layer
+4. 透過 Output Port (Interface) 實現依賴反轉
+```
+
+### 2.2 六角形架構 (Hexagonal Architecture)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -24,51 +49,84 @@
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Spring Boot Application                      │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    Controller Layer                        │  │
-│  │  ┌─────────────────┐        ┌─────────────────────────┐   │  │
-│  │  │ ContactController│        │  AuditLogController     │   │  │
-│  │  └────────┬────────┘        └────────────┬────────────┘   │  │
-│  └───────────┼──────────────────────────────┼────────────────┘  │
-│              │                              │                    │
-│  ┌───────────┼──────────────────────────────┼────────────────┐  │
-│  │           │         AOP Layer            │                │  │
-│  │           │    ┌─────────────────┐       │                │  │
-│  │           └───►│ AuditLogAspect  │◄──────┘                │  │
-│  │                └────────┬────────┘                        │  │
-│  └─────────────────────────┼─────────────────────────────────┘  │
-│                            │                                     │
-│  ┌─────────────────────────┼─────────────────────────────────┐  │
-│  │                   Service Layer                            │  │
-│  │  ┌─────────────────┐    │    ┌─────────────────────────┐  │  │
-│  │  │ ContactService  │    │    │   AuditLogService       │  │  │
-│  │  └────────┬────────┘    │    └────────────┬────────────┘  │  │
-│  └───────────┼─────────────┼─────────────────┼───────────────┘  │
-│              │             │                 │                   │
-│  ┌───────────┼─────────────┼─────────────────┼───────────────┐  │
-│  │           │      Repository Layer         │               │  │
-│  │  ┌────────▼────────┐    │    ┌────────────▼────────────┐  │  │
-│  │  │ContactRepository│    │    │  AuditLogRepository     │  │  │
-│  │  └────────┬────────┘    │    └────────────┬────────────┘  │  │
-│  └───────────┼─────────────┼─────────────────┼───────────────┘  │
-└──────────────┼─────────────┼─────────────────┼───────────────────┘
-               │             │                 │
-               ▼             ▼                 ▼
+│                                                                  │
+│  ┌─────────────────── Infrastructure Layer ──────────────────┐  │
+│  │                                                            │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │              Input Adapters (Driving)                │  │  │
+│  │  │  ┌─────────────────┐   ┌─────────────────────────┐  │  │  │
+│  │  │  │ContactController│   │  AuditLogController     │  │  │  │
+│  │  │  └────────┬────────┘   └────────────┬────────────┘  │  │  │
+│  │  └───────────┼─────────────────────────┼───────────────┘  │  │
+│  │              │                         │                   │  │
+│  │  ┌───────────┼─────────────────────────┼───────────────┐  │  │
+│  │  │           │   Event Infrastructure  │               │  │  │
+│  │  │  ┌────────▼─────────┐  ┌────────────▼────────────┐  │  │  │
+│  │  │  │SpringDomainEvent │  │   AuditEventListener    │  │  │  │
+│  │  │  │   Publisher      │  │ @TransactionalEvent     │  │  │  │
+│  │  │  └──────────────────┘  └─────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│  ┌───────────────── Application Layer ────────────────────────┐  │
+│  │                           │                                 │  │
+│  │  ┌────────────────────────┼─────────────────────────────┐  │  │
+│  │  │        Input Ports     │       Output Ports          │  │  │
+│  │  │  ┌─────────────────┐   │   ┌─────────────────────┐   │  │  │
+│  │  │  │ CreateContact   │   │   │ ContactRepository   │   │  │  │
+│  │  │  │ UseCase         │   │   │ (interface)         │   │  │  │
+│  │  │  ├─────────────────┤   │   ├─────────────────────┤   │  │  │
+│  │  │  │ UpdateContact   │   │   │ AuditLogRepository  │   │  │  │
+│  │  │  │ UseCase         │   │   │ (interface)         │   │  │  │
+│  │  │  ├─────────────────┤   │   ├─────────────────────┤   │  │  │
+│  │  │  │ DeleteContact   │   │   │ DomainEventPublisher│   │  │  │
+│  │  │  │ UseCase         │   │   │ (interface)         │   │  │  │
+│  │  │  └─────────────────┘   │   └─────────────────────┘   │  │  │
+│  │  └────────────────────────┼─────────────────────────────┘  │  │
+│  │                           │                                 │  │
+│  │  ┌────────────────────────┼─────────────────────────────┐  │  │
+│  │  │               Service Layer                           │  │  │
+│  │  │  ┌─────────────────────▼───────────────────────────┐  │  │  │
+│  │  │  │              ContactService                      │  │  │  │
+│  │  │  │  - implements Use Cases                          │  │  │  │
+│  │  │  │  - depends on Output Ports (interfaces)          │  │  │  │
+│  │  │  │  - publishes Domain Events                       │  │  │  │
+│  │  │  └─────────────────────────────────────────────────┘  │  │  │
+│  │  └───────────────────────────────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│  ┌───────────────────── Domain Layer ─────────────────────────┐  │
+│  │                           │                                 │  │
+│  │  ┌─────────────────┐  ┌───┴───────────────┐  ┌───────────┐ │  │
+│  │  │    Entities     │  │   Domain Events   │  │ Exceptions│ │  │
+│  │  │ ┌─────────────┐ │  │ ┌───────────────┐ │  │           │ │  │
+│  │  │ │   Contact   │ │  │ │ContactCreated │ │  │ ContactNot│ │  │
+│  │  │ │   AuditLog  │ │  │ │ContactUpdated │ │  │ Found     │ │  │
+│  │  │ │   ContactId │ │  │ │ContactDeleted │ │  │ Validation│ │  │
+│  │  │ └─────────────┘ │  │ └───────────────┘ │  │ Exception │ │  │
+│  │  └─────────────────┘  └───────────────────┘  └───────────┘ │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│  ┌─────────────────── Infrastructure Layer ───────────────────┐  │
+│  │  ┌─────────────────────────────────────────────────────┐   │  │
+│  │  │              Output Adapters (Driven)                │   │  │
+│  │  │  ┌─────────────────┐   ┌─────────────────────────┐  │   │  │
+│  │  │  │ContactJpaAdapter│   │  AuditLogJpaAdapter     │  │   │  │
+│  │  │  │(implements port)│   │  (implements port)      │  │   │  │
+│  │  │  └────────┬────────┘   └────────────┬────────────┘  │   │  │
+│  │  └───────────┼─────────────────────────┼───────────────┘   │  │
+│  └──────────────┼─────────────────────────┼───────────────────┘  │
+└─────────────────┼─────────────────────────┼──────────────────────┘
+                  ▼                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    H2 Database (In-Memory)                       │
 │  ┌─────────────────────┐      ┌─────────────────────────────┐   │
-│  │   CONTACT Table     │      │      AUDIT_LOG Table        │   │
+│  │   CONTACTS Table    │      │      AUDIT_LOGS Table       │   │
 │  └─────────────────────┘      └─────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    H2 Console (Web UI)                           │
-│                    http://localhost:8080/h2-console              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 技術堆疊
+### 2.3 技術堆疊
 
 | 層級 | 技術選型 | 版本 |
 |------|----------|------|
@@ -76,69 +134,93 @@
 | 框架 | Spring Boot | 3.2.x |
 | Web | Spring Web MVC | - |
 | ORM | Spring Data JPA | - |
-| AOP | Spring AOP | - |
+| Event | Spring ApplicationEvent | - |
 | 資料庫 | H2 Database | - |
-| 建構工具 | Maven / Gradle | - |
+| 建構工具 | Gradle | 8.x |
+| 測試 | Cucumber BDD, JUnit 5 | - |
 | API 文件 | Springdoc OpenAPI (optional) | 2.x |
 
 ---
 
 ## 3. 專案結構
 
+採用六角形架構 (Hexagonal Architecture) 組織程式碼：
+
 ```
 contact-management/
-├── pom.xml (or build.gradle)
+├── build.gradle
 ├── src/
 │   ├── main/
 │   │   ├── java/
-│   │   │   └── com/example/contactmanagement/
-│   │   │       ├── ContactManagementApplication.java
+│   │   │   └── com/example/contact/
+│   │   │       ├── ContactApplication.java
 │   │   │       │
-│   │   │       ├── config/
-│   │   │       │   └── AopConfig.java
+│   │   │       ├── domain/                    # Domain Layer (核心)
+│   │   │       │   ├── model/
+│   │   │       │   │   ├── Contact.java       # Aggregate Root
+│   │   │       │   │   ├── ContactId.java     # Value Object
+│   │   │       │   │   ├── AuditLog.java
+│   │   │       │   │   └── OperationType.java
+│   │   │       │   ├── event/                 # Domain Events
+│   │   │       │   │   ├── DomainEvent.java
+│   │   │       │   │   ├── ContactEvent.java
+│   │   │       │   │   ├── ContactCreatedEvent.java
+│   │   │       │   │   ├── ContactUpdatedEvent.java
+│   │   │       │   │   └── ContactDeletedEvent.java
+│   │   │       │   └── exception/
+│   │   │       │       ├── ContactNotFoundException.java
+│   │   │       │       └── ValidationException.java
 │   │   │       │
-│   │   │       ├── controller/
-│   │   │       │   ├── ContactController.java
-│   │   │       │   └── AuditLogController.java
+│   │   │       ├── application/               # Application Layer
+│   │   │       │   ├── port/
+│   │   │       │   │   ├── in/                # Input Ports (Use Cases)
+│   │   │       │   │   │   ├── CreateContactUseCase.java
+│   │   │       │   │   │   ├── GetContactUseCase.java
+│   │   │       │   │   │   ├── UpdateContactUseCase.java
+│   │   │       │   │   │   └── DeleteContactUseCase.java
+│   │   │       │   │   └── out/               # Output Ports (Interfaces)
+│   │   │       │   │       ├── ContactRepository.java
+│   │   │       │   │       ├── AuditLogRepository.java
+│   │   │       │   │       └── DomainEventPublisher.java
+│   │   │       │   └── service/
+│   │   │       │       ├── ContactService.java
+│   │   │       │       └── AuditLogService.java
 │   │   │       │
-│   │   │       ├── service/
-│   │   │       │   ├── ContactService.java
-│   │   │       │   └── AuditLogService.java
-│   │   │       │
-│   │   │       ├── repository/
-│   │   │       │   ├── ContactRepository.java
-│   │   │       │   └── AuditLogRepository.java
-│   │   │       │
-│   │   │       ├── entity/
-│   │   │       │   ├── Contact.java
-│   │   │       │   └── AuditLog.java
-│   │   │       │
-│   │   │       ├── dto/
-│   │   │       │   ├── ContactRequest.java
-│   │   │       │   ├── ContactResponse.java
-│   │   │       │   └── ApiResponse.java
-│   │   │       │
-│   │   │       ├── aspect/
-│   │   │       │   └── AuditLogAspect.java
-│   │   │       │
-│   │   │       ├── annotation/
-│   │   │       │   └── Auditable.java
-│   │   │       │
-│   │   │       └── exception/
-│   │   │           ├── GlobalExceptionHandler.java
-│   │   │           └── ContactNotFoundException.java
+│   │   │       └── infrastructure/            # Infrastructure Layer
+│   │   │           ├── adapter/
+│   │   │           │   ├── in/                # Input Adapters
+│   │   │           │   │   └── web/
+│   │   │           │   │       ├── ContactController.java
+│   │   │           │   │       └── AuditLogController.java
+│   │   │           │   └── out/               # Output Adapters
+│   │   │           │       └── persistence/
+│   │   │           │           ├── ContactJpaAdapter.java
+│   │   │           │           ├── AuditLogJpaAdapter.java
+│   │   │           │           ├── ContactJpaEntity.java
+│   │   │           │           └── AuditLogJpaEntity.java
+│   │   │           ├── event/                 # Event Infrastructure
+│   │   │           │   ├── SpringDomainEventPublisher.java
+│   │   │           │   └── AuditEventListener.java
+│   │   │           └── config/
+│   │   │               └── JpaConfig.java
 │   │   │
 │   │   └── resources/
-│   │       ├── application.yml
-│   │       └── data.sql (optional: 初始資料)
+│   │       └── application.yml
 │   │
 │   └── test/
 │       └── java/
-│           └── com/example/contactmanagement/
-│               ├── controller/
+│           └── com/example/contact/
+│               ├── unit/                      # 單元測試
+│               │   ├── domain/
+│               │   │   └── ContactTest.java
+│               │   └── application/
+│               │       └── ContactServiceTest.java
+│               ├── integration/               # 整合測試
 │               │   └── ContactControllerTest.java
-│               └── service/
-│                   └── ContactServiceTest.java
+│               └── acceptance/                # BDD 驗收測試
+│                   ├── CucumberTestRunner.java
+│                   └── steps/
+│                       └── ContactSteps.java
 ```
 
 ---
@@ -149,578 +231,441 @@ contact-management/
 
 ```
 ┌──────────────────────────┐          ┌─────────────────────────────────┐
-│        CONTACT           │          │          AUDIT_LOG              │
+│        CONTACTS          │          │          AUDIT_LOGS             │
 ├──────────────────────────┤          ├─────────────────────────────────┤
-│ PK  id          BIGINT   │          │ PK  id              BIGINT      │
-│     name        VARCHAR  │          │     timestamp       TIMESTAMP   │
-│     phone       VARCHAR  │          │     action          VARCHAR     │
-│     address     VARCHAR  │          │     endpoint        VARCHAR     │
-│     created_at  TIMESTAMP│          │     http_method     VARCHAR     │
-│     updated_at  TIMESTAMP│          │     request_body    CLOB        │
-└──────────────────────────┘          │     response_status INT         │
-                                      │     execution_time  BIGINT      │
-                                      │     client_ip       VARCHAR     │
-                                      │     user_agent      VARCHAR     │
-                                      └─────────────────────────────────┘
+│ PK  id          BIGINT   │◄────────┐│ PK  id              BIGINT      │
+│     name        VARCHAR  │         ││     contact_id      BIGINT      │──┐
+│     phone       VARCHAR  │         ││     operation_type  VARCHAR     │  │
+│     address     VARCHAR  │         ││     before_data     CLOB        │  │
+│     created_at  TIMESTAMP│         ││     after_data      CLOB        │  │
+│     updated_at  TIMESTAMP│         ││     created_at      TIMESTAMP   │  │
+└──────────────────────────┘         │└─────────────────────────────────┘  │
+                                     │                                     │
+                                     └─────────────────────────────────────┘
+                                           (Logical Reference)
 ```
 
 ### 4.2 DDL Scripts
 
 ```sql
 -- Contact Table
-CREATE TABLE contact (
+CREATE TABLE contacts (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL,
     phone VARCHAR(20) NOT NULL,
     address VARCHAR(200),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Audit Log Table
-CREATE TABLE audit_log (
+-- Audit Log Table (Domain Event Based)
+CREATE TABLE audit_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    action VARCHAR(20) NOT NULL,
-    endpoint VARCHAR(255) NOT NULL,
-    http_method VARCHAR(10) NOT NULL,
-    request_body CLOB,
-    response_status INT,
-    execution_time BIGINT,
-    client_ip VARCHAR(45),
-    user_agent VARCHAR(500)
+    contact_id BIGINT NOT NULL,
+    operation_type VARCHAR(20) NOT NULL,  -- CREATE, UPDATE, DELETE
+    before_data CLOB,                     -- JSON: 操作前的資料快照
+    after_data CLOB,                      -- JSON: 操作後的資料快照
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for Audit Log queries
-CREATE INDEX idx_audit_log_timestamp ON audit_log(timestamp);
-CREATE INDEX idx_audit_log_action ON audit_log(action);
-CREATE INDEX idx_audit_log_endpoint ON audit_log(endpoint);
-CREATE INDEX idx_audit_log_client_ip ON audit_log(client_ip);
+CREATE INDEX idx_audit_logs_contact_id ON audit_logs(contact_id);
+CREATE INDEX idx_audit_logs_operation_type ON audit_logs(operation_type);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+```
+
+### 4.3 稽核資料範例
+
+```json
+// CREATE 操作 - before_data 為 null
+{
+  "operation_type": "CREATE",
+  "before_data": null,
+  "after_data": {"name": "張三", "phone": "0912345678", "address": "台北市"}
+}
+
+// UPDATE 操作 - 記錄變更前後狀態
+{
+  "operation_type": "UPDATE",
+  "before_data": {"name": "張三", "phone": "0912345678", "address": "台北市"},
+  "after_data": {"name": "張三", "phone": "0987654321", "address": "新北市"}
+}
+
+// DELETE 操作 - after_data 為 null
+{
+  "operation_type": "DELETE",
+  "before_data": {"name": "張三", "phone": "0987654321", "address": "新北市"},
+  "after_data": null
+}
 ```
 
 ---
 
 ## 5. 核心元件設計
 
-### 5.1 Entity 類別
+### 5.1 Domain Layer
 
-#### Contact.java
+#### Contact.java (Domain Entity - Aggregate Root)
 
 ```java
-@Entity
-@Table(name = "contact")
-@EntityListeners(AuditingEntityListener.class)
+/**
+ * Contact domain entity - Aggregate Root.
+ * Pure domain object with no framework dependencies.
+ */
 public class Contact {
-    
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    @Column(nullable = false, length = 50)
+
+    private static final int NAME_MAX_LENGTH = 50;
+    private static final int PHONE_MAX_LENGTH = 20;
+    private static final int ADDRESS_MAX_LENGTH = 200;
+
+    private final ContactId id;
     private String name;
-    
-    @Column(nullable = false, length = 20)
     private String phone;
-    
-    @Column(length = 200)
     private String address;
-    
-    @CreatedDate
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
-    
-    @LastModifiedDate
-    @Column(name = "updated_at")
+    private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
-    // Getters, Setters, Constructors
+
+    /**
+     * Factory method for creating a new Contact.
+     */
+    public static Contact create(String name, String phone, String address) {
+        validate(name, phone, address);
+        LocalDateTime now = LocalDateTime.now();
+        return new Contact(null, name.trim(), phone.trim(),
+            address != null ? address.trim() : null, now, now);
+    }
+
+    /**
+     * Reconstruct Contact from persistence.
+     */
+    public static Contact reconstitute(ContactId id, String name, String phone,
+            String address, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        return new Contact(id, name, phone, address, createdAt, updatedAt);
+    }
+
+    /**
+     * Update contact information with validation.
+     */
+    public void updateInfo(String name, String phone, String address) {
+        validate(name, phone, address);
+        this.name = name.trim();
+        this.phone = phone.trim();
+        this.address = address != null ? address.trim() : null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    private static void validate(String name, String phone, String address) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new ValidationException("name", "姓名為必填欄位");
+        }
+        // ... additional validations
+    }
+
+    // Getters, withId method for assigning ID after persistence
 }
 ```
 
-#### AuditLog.java
+#### Domain Events
 
 ```java
-@Entity
-@Table(name = "audit_log")
-public class AuditLog {
-    
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    @Column(nullable = false)
-    private LocalDateTime timestamp;
-    
-    @Column(nullable = false, length = 20)
-    private String action;  // CREATE, READ, UPDATE, DELETE
-    
-    @Column(nullable = false)
-    private String endpoint;
-    
-    @Column(name = "http_method", nullable = false, length = 10)
-    private String httpMethod;
-    
-    @Lob
-    @Column(name = "request_body")
-    private String requestBody;
-    
-    @Column(name = "response_status")
-    private Integer responseStatus;
-    
-    @Column(name = "execution_time")
-    private Long executionTime;
-    
-    @Column(name = "client_ip", length = 45)
-    private String clientIp;
-    
-    @Column(name = "user_agent", length = 500)
-    private String userAgent;
-    
-    // Getters, Setters, Constructors, Builder pattern
+/**
+ * Base class for all domain events.
+ */
+public abstract class DomainEvent {
+    private final String eventId;
+    private final LocalDateTime occurredAt;
+
+    protected DomainEvent() {
+        this.eventId = UUID.randomUUID().toString();
+        this.occurredAt = LocalDateTime.now();
+    }
+
+    public abstract String getEventType();
+}
+
+/**
+ * Event published when a contact is created.
+ */
+public class ContactCreatedEvent extends ContactEvent {
+    public ContactCreatedEvent(Contact contact) {
+        super(contact);
+    }
+
+    @Override
+    public String getEventType() {
+        return "CONTACT_CREATED";
+    }
+}
+
+/**
+ * Event published when a contact is updated.
+ * Includes before-snapshot for audit trail.
+ */
+public class ContactUpdatedEvent extends ContactEvent {
+    private final Map<String, Object> beforeSnapshot;
+
+    public ContactUpdatedEvent(Contact contact, Map<String, Object> beforeSnapshot) {
+        super(contact);
+        this.beforeSnapshot = beforeSnapshot;
+    }
 }
 ```
 
-### 5.2 Repository 介面
+### 5.2 Application Layer
 
-#### ContactRepository.java
+#### Output Ports (Interfaces)
 
 ```java
-@Repository
-public interface ContactRepository extends JpaRepository<Contact, Long> {
-    
-    List<Contact> findByNameContaining(String name);
-    
-    Optional<Contact> findByPhone(String phone);
+/**
+ * Output port for publishing domain events.
+ * Infrastructure layer provides the implementation.
+ */
+public interface DomainEventPublisher {
+    void publish(DomainEvent event);
+}
+
+/**
+ * Output port for contact persistence.
+ */
+public interface ContactRepository {
+    Contact save(Contact contact);
+    Optional<Contact> findById(ContactId id);
+    List<Contact> findAll();
+    void delete(Contact contact);
 }
 ```
-
-#### AuditLogRepository.java
-
-```java
-@Repository
-public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
-    
-    // 依時間範圍查詢
-    List<AuditLog> findByTimestampBetween(LocalDateTime start, LocalDateTime end);
-    
-    // 依操作類型查詢
-    List<AuditLog> findByAction(String action);
-    
-    // 依 API 端點查詢
-    List<AuditLog> findByEndpointContaining(String endpoint);
-    
-    // 依 Client IP 查詢
-    List<AuditLog> findByClientIp(String clientIp);
-    
-    // 組合條件查詢 (使用 JPA Specification 或 @Query)
-    @Query("SELECT a FROM AuditLog a WHERE " +
-           "(:action IS NULL OR a.action = :action) AND " +
-           "(:endpoint IS NULL OR a.endpoint LIKE %:endpoint%) AND " +
-           "(:clientIp IS NULL OR a.clientIp = :clientIp) AND " +
-           "(:startTime IS NULL OR a.timestamp >= :startTime) AND " +
-           "(:endTime IS NULL OR a.timestamp <= :endTime) " +
-           "ORDER BY a.timestamp DESC")
-    List<AuditLog> findByMultipleConditions(
-        @Param("action") String action,
-        @Param("endpoint") String endpoint,
-        @Param("clientIp") String clientIp,
-        @Param("startTime") LocalDateTime startTime,
-        @Param("endTime") LocalDateTime endTime
-    );
-}
-```
-
-### 5.3 Service 類別
 
 #### ContactService.java
 
 ```java
+/**
+ * Application service that orchestrates contact operations.
+ * Publishes domain events for cross-cutting concerns like auditing.
+ */
 @Service
 @Transactional
-public class ContactService {
-    
+public class ContactService implements CreateContactUseCase, GetContactUseCase,
+        UpdateContactUseCase, DeleteContactUseCase {
+
     private final ContactRepository contactRepository;
-    
-    public ContactService(ContactRepository contactRepository) {
+    private final DomainEventPublisher eventPublisher;
+
+    public ContactService(ContactRepository contactRepository,
+                          DomainEventPublisher eventPublisher) {
         this.contactRepository = contactRepository;
+        this.eventPublisher = eventPublisher;
     }
-    
-    public Contact createContact(ContactRequest request) {
-        Contact contact = new Contact();
-        contact.setName(request.getName());
-        contact.setPhone(request.getPhone());
-        contact.setAddress(request.getAddress());
-        return contactRepository.save(contact);
+
+    @Override
+    public Contact createContact(CreateContactCommand command) {
+        Contact contact = Contact.create(
+            command.name(),
+            command.phone(),
+            command.address()
+        );
+        Contact savedContact = contactRepository.save(contact);
+
+        // Publish domain event - listeners handle audit logging
+        eventPublisher.publish(new ContactCreatedEvent(savedContact));
+
+        return savedContact;
     }
-    
-    @Transactional(readOnly = true)
-    public List<Contact> getAllContacts() {
-        return contactRepository.findAll();
+
+    @Override
+    public Contact updateContact(UpdateContactCommand command) {
+        Contact contact = contactRepository.findById(new ContactId(command.id()))
+            .orElseThrow(() -> new ContactNotFoundException(command.id()));
+
+        // Capture before state for audit
+        Map<String, Object> beforeSnapshot = contact.toSnapshot();
+
+        contact.updateInfo(command.name(), command.phone(), command.address());
+        Contact savedContact = contactRepository.save(contact);
+
+        eventPublisher.publish(new ContactUpdatedEvent(savedContact, beforeSnapshot));
+
+        return savedContact;
     }
-    
-    @Transactional(readOnly = true)
-    public Contact getContactById(Long id) {
-        return contactRepository.findById(id)
-            .orElseThrow(() -> new ContactNotFoundException(id));
-    }
-    
-    public Contact updateContact(Long id, ContactRequest request) {
-        Contact contact = getContactById(id);
-        if (request.getName() != null) {
-            contact.setName(request.getName());
-        }
-        if (request.getPhone() != null) {
-            contact.setPhone(request.getPhone());
-        }
-        if (request.getAddress() != null) {
-            contact.setAddress(request.getAddress());
-        }
-        return contactRepository.save(contact);
-    }
-    
+
+    @Override
     public void deleteContact(Long id) {
-        if (!contactRepository.existsById(id)) {
-            throw new ContactNotFoundException(id);
-        }
-        contactRepository.deleteById(id);
+        Contact contact = contactRepository.findById(new ContactId(id))
+            .orElseThrow(() -> new ContactNotFoundException(id));
+
+        contactRepository.delete(contact);
+
+        eventPublisher.publish(new ContactDeletedEvent(contact));
     }
 }
 ```
 
-#### AuditLogService.java
+### 5.3 Infrastructure Layer
+
+#### SpringDomainEventPublisher.java
 
 ```java
-@Service
-public class AuditLogService {
-    
-    private final AuditLogRepository auditLogRepository;
-    
-    public AuditLogService(AuditLogRepository auditLogRepository) {
-        this.auditLogRepository = auditLogRepository;
-    }
-    
-    @Async  // 非同步寫入，不影響主流程效能
-    public void saveAuditLog(AuditLog auditLog) {
-        auditLogRepository.save(auditLog);
-    }
-    
-    public List<AuditLog> getAllAuditLogs() {
-        return auditLogRepository.findAll(Sort.by(Sort.Direction.DESC, "timestamp"));
-    }
-    
-    public AuditLog getAuditLogById(Long id) {
-        return auditLogRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Audit log not found: " + id));
-    }
-    
-    public List<AuditLog> searchAuditLogs(
-            String action,
-            String endpoint,
-            String clientIp,
-            LocalDateTime startTime,
-            LocalDateTime endTime) {
-        return auditLogRepository.findByMultipleConditions(
-            action, endpoint, clientIp, startTime, endTime);
-    }
-}
-```
+/**
+ * Spring implementation of DomainEventPublisher.
+ * Uses Spring's ApplicationEventPublisher for event dispatching.
+ */
+@Component
+public class SpringDomainEventPublisher implements DomainEventPublisher {
 
-### 5.4 Controller 類別
+    private final ApplicationEventPublisher applicationEventPublisher;
 
-#### ContactController.java
+    public SpringDomainEventPublisher(ApplicationEventPublisher applicationEventPublisher) {
+        this.applicationEventPublisher = applicationEventPublisher;
+    }
 
-```java
-@RestController
-@RequestMapping("/api/contacts")
-public class ContactController {
-    
-    private final ContactService contactService;
-    
-    public ContactController(ContactService contactService) {
-        this.contactService = contactService;
-    }
-    
-    @PostMapping
-    @Auditable(action = "CREATE")
-    public ResponseEntity<ApiResponse<Contact>> createContact(
-            @Valid @RequestBody ContactRequest request) {
-        Contact contact = contactService.createContact(request);
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.success("Contact created successfully", contact));
-    }
-    
-    @GetMapping
-    @Auditable(action = "READ")
-    public ResponseEntity<ApiResponse<List<Contact>>> getAllContacts() {
-        List<Contact> contacts = contactService.getAllContacts();
-        return ResponseEntity.ok(ApiResponse.success("Contacts retrieved", contacts));
-    }
-    
-    @GetMapping("/{id}")
-    @Auditable(action = "READ")
-    public ResponseEntity<ApiResponse<Contact>> getContactById(@PathVariable Long id) {
-        Contact contact = contactService.getContactById(id);
-        return ResponseEntity.ok(ApiResponse.success("Contact found", contact));
-    }
-    
-    @PutMapping("/{id}")
-    @Auditable(action = "UPDATE")
-    public ResponseEntity<ApiResponse<Contact>> updateContact(
-            @PathVariable Long id,
-            @Valid @RequestBody ContactRequest request) {
-        Contact contact = contactService.updateContact(id, request);
-        return ResponseEntity.ok(ApiResponse.success("Contact updated", contact));
-    }
-    
-    @DeleteMapping("/{id}")
-    @Auditable(action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> deleteContact(@PathVariable Long id) {
-        contactService.deleteContact(id);
-        return ResponseEntity.ok(ApiResponse.success("Contact deleted", null));
-    }
-}
-```
-
-#### AuditLogController.java
-
-```java
-@RestController
-@RequestMapping("/api/audit-logs")
-public class AuditLogController {
-    
-    private final AuditLogService auditLogService;
-    
-    public AuditLogController(AuditLogService auditLogService) {
-        this.auditLogService = auditLogService;
-    }
-    
-    @GetMapping
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogs(
-            @RequestParam(required = false) String action,
-            @RequestParam(required = false) String endpoint,
-            @RequestParam(required = false) String clientIp,
-            @RequestParam(required = false) 
-                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
-            @RequestParam(required = false) 
-                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime) {
-        
-        List<AuditLog> logs;
-        
-        // 如果有任何查詢條件，使用組合查詢
-        if (action != null || endpoint != null || clientIp != null || 
-            startTime != null || endTime != null) {
-            logs = auditLogService.searchAuditLogs(
-                action, endpoint, clientIp, startTime, endTime);
-        } else {
-            logs = auditLogService.getAllAuditLogs();
-        }
-        
-        return ResponseEntity.ok(ApiResponse.success("Audit logs retrieved", logs));
-    }
-    
-    @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<AuditLog>> getAuditLogById(@PathVariable Long id) {
-        AuditLog log = auditLogService.getAuditLogById(id);
-        return ResponseEntity.ok(ApiResponse.success("Audit log found", log));
+    @Override
+    public void publish(DomainEvent event) {
+        applicationEventPublisher.publishEvent(event);
     }
 }
 ```
 
 ---
 
-## 6. AOP 稽核日誌設計
+## 6. Domain Events 稽核設計
 
 ### 6.1 設計概念
 
-使用 Spring AOP 的 `@Around` Advice 攔截所有標註 `@Auditable` 的方法，在方法執行前後收集稽核資訊並寫入資料庫。
+使用 Domain Events 模式將稽核日誌完全從業務邏輯解耦。業務層只發布「發生了什麼事」的事件，基礎設施層的監聽器負責處理稽核記錄。
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    AOP Audit Flow                           │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  Request ──► AuditLogAspect ──► Controller ──► Service      │
-│                    │                │                       │
-│                    │                │                       │
-│              ┌─────▼─────┐          │                       │
-│              │ Before:   │          │                       │
-│              │ - Start   │          │                       │
-│              │   Timer   │          │                       │
-│              │ - Capture │          │                       │
-│              │   Request │          │                       │
-│              └───────────┘          │                       │
-│                                     │                       │
-│              ┌───────────┐          │                       │
-│              │ After:    │◄─────────┘                       │
-│              │ - Stop    │                                  │
-│              │   Timer   │                                  │
-│              │ - Capture │                                  │
-│              │   Response│                                  │
-│              │ - Save    │                                  │
-│              │   Log     │                                  │
-│              └─────┬─────┘                                  │
-│                    │                                        │
-│                    ▼                                        │
-│            AuditLogService.saveAuditLog() [Async]           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Domain Events Audit Flow                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────┐    ┌──────────────────┐    ┌────────────────────────┐│
+│  │Controller│───►│  ContactService  │───►│  ContactRepository     ││
+│  └──────────┘    │                  │    │  (save/update/delete)  ││
+│                  │  ┌────────────┐  │    └────────────────────────┘│
+│                  │  │ publish()  │  │                               │
+│                  │  └─────┬──────┘  │                               │
+│                  └────────┼─────────┘                               │
+│                           │                                         │
+│                           ▼                                         │
+│                  ┌─────────────────────┐                            │
+│                  │DomainEventPublisher │  (Output Port)             │
+│                  │     (interface)     │                            │
+│                  └─────────┬───────────┘                            │
+│                            │                                        │
+│  ─────────────────────────┬┴───────────────────────────────────────│
+│  Infrastructure Layer     │                                         │
+│                            ▼                                        │
+│                  ┌─────────────────────────┐                        │
+│                  │SpringDomainEventPublisher│                       │
+│                  │  (implements port)       │                       │
+│                  └─────────┬───────────────┘                        │
+│                            │                                        │
+│                            ▼                                        │
+│                  ┌─────────────────────────┐                        │
+│                  │   AuditEventListener    │                        │
+│                  │ @TransactionalEventListener                      │
+│                  │ (phase = BEFORE_COMMIT) │                        │
+│                  └─────────┬───────────────┘                        │
+│                            │                                        │
+│                            ▼                                        │
+│                  ┌─────────────────────────┐                        │
+│                  │   AuditLogRepository    │                        │
+│                  │      .save()            │                        │
+│                  └─────────────────────────┘                        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 自定義 Annotation
+### 6.2 架構優勢
 
-#### Auditable.java
+| 面向 | Domain Events | AOP |
+|------|--------------|-----|
+| 依賴方向 | Application → Domain (正確) | Application → Infrastructure (違反) |
+| 業務邏輯 | 完全純淨，只發布事件 | 需要 @Auditable 註解 |
+| 可測試性 | 輕鬆 Mock DomainEventPublisher | 需處理 AOP 代理 |
+| 資料完整性 | 可記錄 before/after 快照 | 僅記錄 HTTP 層資訊 |
+| 事務一致性 | TransactionalEventListener 保證 | 需額外處理 |
+
+### 6.3 Event Listener 實作
+
+#### AuditEventListener.java
 
 ```java
-@Target(ElementType.METHOD)
-@Retention(RetentionPolicy.RUNTIME)
-@Documented
-public @interface Auditable {
-    
-    /**
-     * 操作類型：CREATE, READ, UPDATE, DELETE
-     */
-    String action();
-    
-    /**
-     * 操作描述（選填）
-     */
-    String description() default "";
-}
-```
-
-### 6.3 Aspect 實作
-
-#### AuditLogAspect.java
-
-```java
-@Aspect
+/**
+ * Event listener that creates audit logs in response to domain events.
+ *
+ * Uses TransactionalEventListener to ensure audit logs are only
+ * created after the main transaction commits successfully.
+ */
 @Component
-@Slf4j
-public class AuditLogAspect {
-    
-    private final AuditLogService auditLogService;
-    private final HttpServletRequest request;
+public class AuditEventListener {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AuditEventListener.class);
+
+    private final AuditLogRepository auditLogRepository;
     private final ObjectMapper objectMapper;
-    
-    public AuditLogAspect(AuditLogService auditLogService, 
-                          HttpServletRequest request,
-                          ObjectMapper objectMapper) {
-        this.auditLogService = auditLogService;
-        this.request = request;
+
+    public AuditEventListener(AuditLogRepository auditLogRepository,
+                              ObjectMapper objectMapper) {
+        this.auditLogRepository = auditLogRepository;
         this.objectMapper = objectMapper;
     }
-    
-    @Around("@annotation(auditable)")
-    public Object auditLog(ProceedingJoinPoint joinPoint, Auditable auditable) throws Throwable {
-        
-        // 開始計時
-        long startTime = System.currentTimeMillis();
-        
-        // 取得請求資訊
-        String endpoint = request.getRequestURI();
-        String httpMethod = request.getMethod();
-        String clientIp = getClientIp(request);
-        String userAgent = request.getHeader("User-Agent");
-        String requestBody = extractRequestBody(joinPoint);
-        
-        Object result = null;
-        int responseStatus = 200;
-        
-        try {
-            // 執行目標方法
-            result = joinPoint.proceed();
-            
-            // 取得回應狀態碼
-            if (result instanceof ResponseEntity) {
-                responseStatus = ((ResponseEntity<?>) result).getStatusCode().value();
-            }
-            
-            return result;
-            
-        } catch (Exception e) {
-            responseStatus = 500;
-            throw e;
-            
-        } finally {
-            // 計算執行時間
-            long executionTime = System.currentTimeMillis() - startTime;
-            
-            // 建立稽核日誌
-            AuditLog auditLog = AuditLog.builder()
-                .timestamp(LocalDateTime.now())
-                .action(auditable.action())
-                .endpoint(endpoint)
-                .httpMethod(httpMethod)
-                .requestBody(requestBody)
-                .responseStatus(responseStatus)
-                .executionTime(executionTime)
-                .clientIp(clientIp)
-                .userAgent(userAgent)
-                .build();
-            
-            // 非同步儲存（不影響主流程）
-            auditLogService.saveAuditLog(auditLog);
-            
-            log.debug("Audit log recorded: {} {} - {} ms", 
-                httpMethod, endpoint, executionTime);
-        }
+
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void onContactCreated(ContactCreatedEvent event) {
+        LOG.debug("Handling ContactCreatedEvent for contact ID: {}", event.getContactId());
+
+        AuditLog auditLog = AuditLog.create(
+            event.getContactId(),
+            OperationType.CREATE,
+            null,                          // before_data is null for CREATE
+            toJson(event.getSnapshot())    // after_data contains new state
+        );
+        auditLogRepository.save(auditLog);
+
+        LOG.info("Audit log created for CREATE operation on contact {}", event.getContactId());
     }
-    
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        // 處理多個 IP 的情況（取第一個）
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
+
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void onContactUpdated(ContactUpdatedEvent event) {
+        AuditLog auditLog = AuditLog.create(
+            event.getContactId(),
+            OperationType.UPDATE,
+            toJson(event.getBeforeSnapshot()),  // before_data
+            toJson(event.getSnapshot())         // after_data
+        );
+        auditLogRepository.save(auditLog);
     }
-    
-    private String extractRequestBody(ProceedingJoinPoint joinPoint) {
+
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void onContactDeleted(ContactDeletedEvent event) {
+        AuditLog auditLog = AuditLog.create(
+            event.getContactId(),
+            OperationType.DELETE,
+            toJson(event.getSnapshot()),  // before_data (deleted state)
+            null                          // after_data is null for DELETE
+        );
+        auditLogRepository.save(auditLog);
+    }
+
+    private String toJson(Object obj) {
+        if (obj == null) return null;
         try {
-            Object[] args = joinPoint.getArgs();
-            for (Object arg : args) {
-                if (arg != null && !(arg instanceof HttpServletRequest) 
-                    && !(arg instanceof HttpServletResponse)) {
-                    // 過濾敏感資訊（如密碼）
-                    return objectMapper.writeValueAsString(arg);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to extract request body", e);
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            LOG.error("Failed to serialize object to JSON: {}", e.getMessage());
+            return null;
         }
-        return null;
     }
 }
 ```
 
-### 6.4 AOP 配置
+### 6.4 事務一致性
 
-#### AopConfig.java
+使用 `@TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)` 確保：
 
-```java
-@Configuration
-@EnableAspectJAutoProxy
-@EnableAsync  // 啟用非同步支援
-public class AopConfig {
-    
-    @Bean
-    public ObjectMapper objectMapper() {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.registerModule(new JavaTimeModule());
-        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        return mapper;
-    }
-}
-```
+1. **同一事務**: 稽核日誌與業務操作在同一事務中
+2. **一致性**: 業務操作失敗時，稽核日誌也會回滾
+3. **順序保證**: 事件按發布順序處理
 
 ---
 
@@ -1149,57 +1094,122 @@ public class ContactNotFoundException extends RuntimeException {
 
 ## 12. 測試計畫
 
-### 12.1 單元測試範圍
+### 12.1 測試架構
+
+採用多層次測試策略，確保各層級的正確性：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    驗收測試 (BDD)                        │
+│              Cucumber + Spring Boot Test                 │
+│                 測試完整業務場景                          │
+├─────────────────────────────────────────────────────────┤
+│                    整合測試                              │
+│           @SpringBootTest + MockMvc                      │
+│              測試 API 層與資料庫整合                      │
+├─────────────────────────────────────────────────────────┤
+│                    單元測試                              │
+│              JUnit 5 + Mockito                          │
+│         測試 Domain/Application 層邏輯                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 12.2 單元測試範圍
 
 | 測試對象 | 測試內容 |
 |----------|----------|
-| ContactService | CRUD 業務邏輯 |
-| AuditLogService | 日誌查詢邏輯 |
-| AuditLogAspect | AOP 攔截與日誌記錄 |
+| Contact (Domain) | 實體建立、驗證規則、狀態更新 |
+| ContactService | 業務邏輯、事件發布驗證 |
+| AuditEventListener | 事件處理、稽核日誌建立 |
 
-### 12.2 整合測試範圍
+### 12.3 整合測試範圍
 
 | 測試對象 | 測試內容 |
 |----------|----------|
 | ContactController | API 端點、HTTP 狀態碼、回應格式 |
 | AuditLogController | 日誌查詢 API |
-| End-to-End | 完整流程測試 |
+| Domain Events Flow | 事件發布到稽核記錄的完整流程 |
 
-### 12.3 測試案例範例
+### 12.4 測試案例範例
+
+#### 單元測試 - ContactService
 
 ```java
-@SpringBootTest
-@AutoConfigureMockMvc
-class ContactControllerTest {
-    
-    @Autowired
-    private MockMvc mockMvc;
-    
-    @Test
-    void shouldCreateContact() throws Exception {
-        String requestBody = """
-            {
-                "name": "測試用戶",
-                "phone": "0912345678",
-                "address": "測試地址"
-            }
-            """;
-            
-        mockMvc.perform(post("/api/contacts")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(requestBody))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.data.name").value("測試用戶"));
+@ExtendWith(MockitoExtension.class)
+@DisplayName("ContactService Tests")
+class ContactServiceTest {
+
+    @Mock
+    private ContactRepository contactRepository;
+
+    @Mock
+    private DomainEventPublisher eventPublisher;
+
+    private ContactService contactService;
+
+    @BeforeEach
+    void setUp() {
+        contactService = new ContactService(contactRepository, eventPublisher);
     }
-    
+
     @Test
-    void shouldReturnNotFoundForNonExistentContact() throws Exception {
-        mockMvc.perform(get("/api/contacts/999"))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.success").value(false));
+    @DisplayName("should create and save contact successfully")
+    void shouldCreateAndSaveContact() {
+        // Given
+        CreateContactCommand command = new CreateContactCommand("張三", "0912345678", "台北市");
+        Contact savedContact = Contact.create("張三", "0912345678", "台北市")
+                .withId(new ContactId(1L));
+
+        when(contactRepository.save(any(Contact.class))).thenReturn(savedContact);
+
+        // When
+        Contact result = contactService.createContact(command);
+
+        // Then
+        assertThat(result.getId()).isNotNull();
+        assertThat(result.getName()).isEqualTo("張三");
+        verify(contactRepository, times(1)).save(any(Contact.class));
+    }
+
+    @Test
+    @DisplayName("should publish ContactCreatedEvent after creation")
+    void shouldPublishContactCreatedEvent() {
+        // Given
+        CreateContactCommand command = new CreateContactCommand("王五", "0911222333", "新北市");
+        Contact savedContact = Contact.create("王五", "0911222333", "新北市")
+                .withId(new ContactId(3L));
+
+        when(contactRepository.save(any(Contact.class))).thenReturn(savedContact);
+
+        // When
+        contactService.createContact(command);
+
+        // Then
+        ArgumentCaptor<ContactCreatedEvent> eventCaptor =
+                ArgumentCaptor.forClass(ContactCreatedEvent.class);
+        verify(eventPublisher).publish(eventCaptor.capture());
+
+        ContactCreatedEvent event = eventCaptor.getValue();
+        assertThat(event.getContactId()).isEqualTo(3L);
     }
 }
+```
+
+#### BDD 驗收測試
+
+```gherkin
+# contact.feature
+Feature: 聯絡人管理
+  作為系統使用者
+  我希望能夠管理聯絡人資料
+  以便維護客戶關係
+
+  Scenario: 成功新增聯絡人
+    Given 系統已啟動
+    When 我新增一位姓名為 "張三"、電話為 "0912345678" 的聯絡人
+    Then 應該回傳 HTTP 狀態碼 201
+    And 回傳資料中應包含聯絡人姓名 "張三"
+    And 系統應該產生一筆 CREATE 類型的稽核日誌
 ```
 
 ---
@@ -1263,36 +1273,91 @@ curl "http://localhost:8080/api/audit-logs?startTime=2026-01-09T00:00:00&endTime
 
 ## 附錄 B: 架構決策記錄 (ADR)
 
-### ADR-001: 使用 Spring AOP 實作稽核日誌
+### ADR-001: 使用 Domain Events 取代 AOP 實作稽核日誌
+
+**狀態**: 已採用 (v2.0)
+
+**背景**:
+- 原本使用 Spring AOP 搭配 `@Auditable` 註解實作稽核日誌
+- 發現此方式導致 Application Layer 依賴 Infrastructure Layer（`@Auditable` 定義在 Infrastructure）
+- 違反六角形架構的依賴規則：外層應依賴內層，而非相反
+
+**決策**: 使用 Domain Events 模式重構稽核日誌機制。
+
+**替代方案評估**:
+
+| 方案 | 優點 | 缺點 |
+|------|------|------|
+| AOP + @Auditable | 實作簡單 | 違反依賴規則、只能記錄 HTTP 層資訊 |
+| JPA EntityListeners | 自動觸發 | 無法記錄 before 狀態、擴展性差 |
+| Hibernate Envers | 功能完整 | 耦合 Hibernate、學習成本高 |
+| **Domain Events** | **依賴正確、資料完整** | **需要手動發布事件** |
+
+**實作細節**:
+1. Domain Layer 定義事件類別 (ContactCreatedEvent, ContactUpdatedEvent, ContactDeletedEvent)
+2. Application Layer 定義 Output Port (DomainEventPublisher interface)
+3. Infrastructure Layer 實作事件發布器和監聽器
+4. 使用 @TransactionalEventListener 確保事務一致性
+
+**理由**:
+- 依賴方向正確：Application Layer 只依賴 Domain Layer
+- 資料完整性：可記錄 before/after 快照
+- 關注點分離：業務邏輯不知道稽核日誌的存在
+- 可測試性：輕鬆 Mock DomainEventPublisher
+- 可擴展性：新增監聽器即可擴展功能（如通知、同步等）
+
+**後果**:
+- 需要在 Service 中手動發布事件
+- 事件類別需要攜帶足夠的資訊供監聽器使用
+
+---
+
+### ADR-002: 架構依賴規則
 
 **狀態**: 已採用
 
-**背景**: 需要在不侵入業務邏輯的情況下記錄所有 API 呼叫。
+**背景**: 確保專案遵循六角形架構的依賴規則，維持架構整潔。
 
-**決策**: 使用 Spring AOP 的 @Around advice 搭配自定義 @Auditable annotation。
+**決策**: 強制執行以下依賴規則：
+
+```
+┌───────────────────────────────────────────────────────┐
+│                    依賴規則                            │
+├───────────────────────────────────────────────────────┤
+│  ✓ Infrastructure → Application  (允許)               │
+│  ✓ Infrastructure → Domain       (允許)               │
+│  ✓ Application → Domain          (允許)               │
+│  ✗ Application → Infrastructure  (禁止)               │
+│  ✗ Domain → Application          (禁止)               │
+│  ✗ Domain → Infrastructure       (禁止)               │
+└───────────────────────────────────────────────────────┘
+```
+
+**實作方式**:
+1. 使用 Output Port (Interface) 實現依賴反轉
+2. Application Layer 定義 interface，Infrastructure Layer 實作
+3. 使用 Spring 依賴注入綁定實作
 
 **理由**:
-- 關注點分離：稽核邏輯與業務邏輯完全解耦
-- 可維護性：集中管理稽核邏輯
-- 可擴展性：易於新增稽核欄位或變更記錄方式
-- 低侵入性：不需修改現有 Controller 程式碼
+- 核心業務邏輯不受技術細節影響
+- 可輕鬆替換基礎設施（如更換資料庫、訊息佇列）
+- 提高可測試性
 
-**後果**:
-- 需要額外的 AOP 相關知識
-- 對於複雜場景可能需要額外配置
+---
 
-### ADR-002: 稽核日誌非同步寫入
+### ADR-003: 稽核日誌同步寫入 (Transaction 內)
 
 **狀態**: 已採用
 
-**背景**: 稽核日誌寫入不應影響主要業務的回應時間。
+**背景**: 需要確保稽核日誌與業務操作的一致性。
 
-**決策**: 使用 @Async 進行非同步寫入。
+**決策**: 使用 `@TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)` 在交易提交前同步寫入稽核日誌。
 
 **理由**:
-- 效能：不阻塞主要業務流程
-- 用戶體驗：維持 API 回應速度
+- 一致性：業務操作失敗時，稽核日誌自動回滾
+- 完整性：不會遺漏任何操作記錄
+- 順序性：確保事件按發布順序處理
 
 **後果**:
-- 日誌寫入可能有些微延遲
-- 需要適當處理非同步例外
+- 稽核日誌寫入會增加交易時間
+- 如果效能成為瓶頸，可考慮改用 AFTER_COMMIT + 補償機制
