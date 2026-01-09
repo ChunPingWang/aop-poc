@@ -1,0 +1,552 @@
+openapi: 3.0.3
+info:
+  title: Contact Management API
+  description: |
+    RESTful API for managing contacts with automatic audit logging.
+
+    This API provides CRUD operations for contacts and query capabilities for audit logs.
+    All API operations are automatically logged for audit purposes.
+  version: 1.0.0
+  contact:
+    name: AOP-POC Team
+
+servers:
+  - url: http://localhost:8080
+    description: Development server (H2)
+  - url: http://localhost:8080
+    description: Production server (PostgreSQL)
+
+tags:
+  - name: Contacts
+    description: Contact management operations
+  - name: Audit Logs
+    description: Audit log query operations
+
+paths:
+  /api/contacts:
+    get:
+      tags:
+        - Contacts
+      summary: Get all contacts
+      description: Retrieves a list of all contacts in the system
+      operationId: getAllContacts
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContactResponse'
+              example:
+                - id: 1
+                  name: "張三"
+                  phone: "0912345678"
+                  address: "台北市中正區"
+                  createdAt: "2026-01-10T10:30:00"
+                  updatedAt: "2026-01-10T10:30:00"
+                - id: 2
+                  name: "李四"
+                  phone: "0987654321"
+                  address: null
+                  createdAt: "2026-01-10T11:00:00"
+                  updatedAt: "2026-01-10T11:00:00"
+
+    post:
+      tags:
+        - Contacts
+      summary: Create a new contact
+      description: Creates a new contact with the provided information
+      operationId: createContact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContactRequest'
+            example:
+              name: "張三"
+              phone: "0912345678"
+              address: "台北市中正區"
+      responses:
+        '201':
+          description: Contact created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactResponse'
+              example:
+                id: 1
+                name: "張三"
+                phone: "0912345678"
+                address: "台北市中正區"
+                createdAt: "2026-01-10T10:30:00"
+                updatedAt: "2026-01-10T10:30:00"
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                nameRequired:
+                  summary: Name is required
+                  value:
+                    status: 400
+                    error: "Bad Request"
+                    message: "姓名為必填欄位"
+                    timestamp: "2026-01-10T10:30:00"
+                    path: "/api/contacts"
+                phoneRequired:
+                  summary: Phone is required
+                  value:
+                    status: 400
+                    error: "Bad Request"
+                    message: "電話為必填欄位"
+                    timestamp: "2026-01-10T10:30:00"
+                    path: "/api/contacts"
+                nameTooLong:
+                  summary: Name exceeds maximum length
+                  value:
+                    status: 400
+                    error: "Bad Request"
+                    message: "姓名長度不可超過 50 字元"
+                    timestamp: "2026-01-10T10:30:00"
+                    path: "/api/contacts"
+
+  /api/contacts/{id}:
+    get:
+      tags:
+        - Contacts
+      summary: Get a contact by ID
+      description: Retrieves a single contact by its unique identifier
+      operationId: getContactById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Contact unique identifier
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactResponse'
+              example:
+                id: 1
+                name: "張三"
+                phone: "0912345678"
+                address: "台北市中正區"
+                createdAt: "2026-01-10T10:30:00"
+                updatedAt: "2026-01-10T10:30:00"
+        '404':
+          description: Contact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: 404
+                error: "Not Found"
+                message: "聯絡人不存在"
+                timestamp: "2026-01-10T10:30:00"
+                path: "/api/contacts/999"
+
+    put:
+      tags:
+        - Contacts
+      summary: Update a contact
+      description: Updates an existing contact with the provided information
+      operationId: updateContact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Contact unique identifier
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContactRequest'
+            example:
+              name: "張三豐"
+              phone: "0912345678"
+              address: "台北市信義區"
+      responses:
+        '200':
+          description: Contact updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactResponse'
+              example:
+                id: 1
+                name: "張三豐"
+                phone: "0912345678"
+                address: "台北市信義區"
+                createdAt: "2026-01-10T10:30:00"
+                updatedAt: "2026-01-10T11:00:00"
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Contact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: 404
+                error: "Not Found"
+                message: "聯絡人不存在"
+                timestamp: "2026-01-10T10:30:00"
+                path: "/api/contacts/999"
+
+    delete:
+      tags:
+        - Contacts
+      summary: Delete a contact
+      description: Deletes an existing contact by its unique identifier
+      operationId: deleteContact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Contact unique identifier
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        '204':
+          description: Contact deleted successfully
+        '404':
+          description: Contact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: 404
+                error: "Not Found"
+                message: "聯絡人不存在"
+                timestamp: "2026-01-10T10:30:00"
+                path: "/api/contacts/999"
+
+  /api/audit-logs:
+    get:
+      tags:
+        - Audit Logs
+      summary: Query audit logs
+      description: |
+        Retrieves audit logs with optional filtering by various criteria.
+        Multiple filters can be combined for more specific queries.
+      operationId: queryAuditLogs
+      parameters:
+        - name: startTime
+          in: query
+          required: false
+          description: Filter logs from this timestamp (inclusive)
+          schema:
+            type: string
+            format: date-time
+          example: "2026-01-10T00:00:00"
+        - name: endTime
+          in: query
+          required: false
+          description: Filter logs until this timestamp (inclusive)
+          schema:
+            type: string
+            format: date-time
+          example: "2026-01-10T23:59:59"
+        - name: operationType
+          in: query
+          required: false
+          description: Filter by operation type
+          schema:
+            type: string
+            enum:
+              - CREATE
+              - READ
+              - UPDATE
+              - DELETE
+          example: "CREATE"
+        - name: apiEndpoint
+          in: query
+          required: false
+          description: Filter by API endpoint (partial match)
+          schema:
+            type: string
+          example: "/api/contacts"
+        - name: clientIp
+          in: query
+          required: false
+          description: Filter by client IP address
+          schema:
+            type: string
+          example: "192.168.1.100"
+        - name: page
+          in: query
+          required: false
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 0
+        - name: size
+          in: query
+          required: false
+          description: Page size
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          example: 20
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogPageResponse'
+              example:
+                content:
+                  - id: 1
+                    operationTime: "2026-01-10T10:30:00"
+                    operationType: "CREATE"
+                    apiEndpoint: "/api/contacts"
+                    httpMethod: "POST"
+                    requestBody: '{"name":"張三","phone":"0912345678"}'
+                    responseStatus: 201
+                    executionTimeMs: 45
+                    clientIp: "192.168.1.100"
+                    userAgent: "Mozilla/5.0"
+                totalElements: 1
+                totalPages: 1
+                size: 20
+                number: 0
+
+components:
+  schemas:
+    CreateContactRequest:
+      type: object
+      required:
+        - name
+        - phone
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Contact name (required)
+          example: "張三"
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Contact phone number (required)
+          example: "0912345678"
+        address:
+          type: string
+          maxLength: 200
+          nullable: true
+          description: Contact address (optional)
+          example: "台北市中正區"
+
+    UpdateContactRequest:
+      type: object
+      required:
+        - name
+        - phone
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Contact name (required)
+          example: "張三豐"
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Contact phone number (required)
+          example: "0912345678"
+        address:
+          type: string
+          maxLength: 200
+          nullable: true
+          description: Contact address (optional)
+          example: "台北市信義區"
+
+    ContactResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Unique identifier
+          example: 1
+        name:
+          type: string
+          description: Contact name
+          example: "張三"
+        phone:
+          type: string
+          description: Contact phone number
+          example: "0912345678"
+        address:
+          type: string
+          nullable: true
+          description: Contact address
+          example: "台北市中正區"
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp
+          example: "2026-01-10T10:30:00"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+          example: "2026-01-10T10:30:00"
+
+    AuditLogResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Unique identifier
+          example: 1
+        operationTime:
+          type: string
+          format: date-time
+          description: Operation timestamp
+          example: "2026-01-10T10:30:00"
+        operationType:
+          type: string
+          enum:
+            - CREATE
+            - READ
+            - UPDATE
+            - DELETE
+          description: Type of operation
+          example: "CREATE"
+        apiEndpoint:
+          type: string
+          description: API endpoint path
+          example: "/api/contacts"
+        httpMethod:
+          type: string
+          description: HTTP method
+          example: "POST"
+        requestBody:
+          type: string
+          nullable: true
+          description: Request body content (JSON)
+          example: '{"name":"張三","phone":"0912345678"}'
+        responseStatus:
+          type: integer
+          description: HTTP response status code
+          example: 201
+        executionTimeMs:
+          type: integer
+          format: int64
+          description: Execution time in milliseconds
+          example: 45
+        clientIp:
+          type: string
+          description: Client IP address
+          example: "192.168.1.100"
+        userAgent:
+          type: string
+          nullable: true
+          description: User agent string
+          example: "Mozilla/5.0"
+
+    AuditLogPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogResponse'
+        totalElements:
+          type: integer
+          format: int64
+          description: Total number of elements
+          example: 100
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 5
+        size:
+          type: integer
+          description: Page size
+          example: 20
+        number:
+          type: integer
+          description: Current page number (0-indexed)
+          example: 0
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: HTTP status code
+          example: 400
+        error:
+          type: string
+          description: Error type
+          example: "Bad Request"
+        message:
+          type: string
+          description: Error message
+          example: "姓名為必填欄位"
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp
+          example: "2026-01-10T10:30:00"
+        path:
+          type: string
+          description: Request path
+          example: "/api/contacts"
+        validationErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          nullable: true
+          description: List of validation errors (if applicable)
+
+    ValidationError:
+      type: object
+      properties:
+        field:
+          type: string
+          description: Field name
+          example: "name"
+        message:
+          type: string
+          description: Validation error message
+          example: "姓名為必填欄位"
