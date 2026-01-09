@@ -1,17 +1,13 @@
 package com.example.contact.domain.model;
 
 import com.example.contact.domain.exception.ValidationException;
-import com.example.contact.infrastructure.audit.AuditableEntity;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Contact domain entity - Aggregate Root.
  * Pure domain object with no framework dependencies.
- * Implements AuditableEntity for automatic audit logging.
  */
-public class Contact implements AuditableEntity {
+public class Contact {
 
     private static final int NAME_MAX_LENGTH = 50;
     private static final int PHONE_MAX_LENGTH = 20;
@@ -118,26 +114,5 @@ public class Contact implements AuditableEntity {
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
-    }
-
-    // AuditableEntity implementation
-    @Override
-    public String getEntityType() {
-        return "Contact";
-    }
-
-    @Override
-    public Long getEntityId() {
-        return id != null ? id.value() : null;
-    }
-
-    @Override
-    public Object toAuditSnapshot() {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("id", id != null ? id.value() : null);
-        snapshot.put("name", name);
-        snapshot.put("phone", phone);
-        snapshot.put("address", address);
-        return snapshot;
     }
 }

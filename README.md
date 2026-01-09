@@ -573,6 +573,12 @@ src/
 │   │   │   │   ├── ContactId.java
 │   │   │   │   ├── AuditLog.java
 │   │   │   │   └── OperationType.java
+│   │   │   ├── event/                       # 領域事件
+│   │   │   │   ├── DomainEvent.java
+│   │   │   │   ├── ContactEvent.java
+│   │   │   │   ├── ContactCreatedEvent.java
+│   │   │   │   ├── ContactUpdatedEvent.java
+│   │   │   │   └── ContactDeletedEvent.java
 │   │   │   └── exception/                   # 領域例外
 │   │   │       ├── ContactNotFoundException.java
 │   │   │       └── ValidationException.java
@@ -594,16 +600,9 @@ src/
 │   │       │       ├── entity/              # JPA 實體
 │   │       │       ├── ContactJpaAdapter.java
 │   │       │       └── AuditLogJpaAdapter.java
-│   │       ├── audit/                       # 稽核模組
-│   │       │   ├── Auditable.java           # 稽核標註
-│   │       │   ├── AuditContext.java        # 稽核上下文
-│   │       │   ├── AuditableEntity.java     # 可稽核實體介面
-│   │       │   ├── AuditDataExtractor.java  # 資料萃取器介面
-│   │       │   ├── AuditEventHandler.java   # 事件處理器介面
-│   │       │   ├── DatabaseAuditEventHandler.java
-│   │       │   └── ContactAuditDataExtractor.java
-│   │       ├── aspect/                      # AOP 切面
-│   │       │   └── AuditAspect.java
+│   │       ├── event/                       # 領域事件處理
+│   │       │   ├── SpringDomainEventPublisher.java
+│   │       │   └── AuditEventListener.java
 │   │       └── config/                      # 配置類別
 │   │           ├── OpenApiConfig.java
 │   │           ├── WebConfig.java
@@ -627,281 +626,309 @@ src/
             └── audit-query.feature
 ```
 
-## 稽核模組開發指引
+## 稽核模組開發指引 (Domain Events 架構)
 
-本專案提供了一個可重用的稽核模組，可輕鬆為任何實體添加自動稽核日誌功能。
+本專案使用 **Domain Events（領域事件）** 模式實作稽核機制，實現業務邏輯與稽核邏輯的**完全解耦**。
 
-### 稽核模組架構
+### 為什麼選擇 Domain Events？
+
+| 比較項目 | AOP 方式 | Domain Events 方式 |
+|---------|---------|-------------------|
+| 耦合度 | Service 需依賴 @Auditable | Service 完全不知道稽核存在 |
+| 可測試性 | 需 Mock AOP 相關元件 | 只需 Mock EventPublisher |
+| 擴展性 | 修改 Aspect 程式碼 | 新增 EventListener 即可 |
+| 符合 DDD | 部分符合 | 完全符合 |
+| 交易一致性 | 同一交易 | 可選同步/非同步 |
+
+### 架構概覽
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant ContactService
+    participant EventPublisher
+    participant AuditEventListener
+    participant AuditLogRepository
+    participant Database
+
+    Client->>Controller: HTTP Request
+    Controller->>ContactService: createContact()
+
+    Note over ContactService: 執行業務邏輯
+    ContactService->>ContactService: Contact.create()
+    ContactService->>Database: save(contact)
+
+    Note over ContactService: 發布領域事件
+    ContactService->>EventPublisher: publish(ContactCreatedEvent)
+
+    Note over AuditEventListener: @TransactionalEventListener
+    EventPublisher->>AuditEventListener: onContactCreated()
+    AuditEventListener->>AuditLogRepository: save(auditLog)
+    AuditLogRepository->>Database: INSERT audit_logs
+
+    ContactService-->>Controller: Contact
+    Controller-->>Client: HTTP Response
+```
+
+### 核心元件
 
 ```mermaid
 graph TB
-    subgraph "使用層"
-        SVC["Service Layer<br/>@Auditable 標註"]
+    subgraph "Domain Layer"
+        DE["DomainEvent<br/>(Base Class)"]
+        CE["ContactEvent"]
+        CCE["ContactCreatedEvent"]
+        CUE["ContactUpdatedEvent"]
+        CDE["ContactDeletedEvent"]
+
+        DE --> CE
+        CE --> CCE
+        CE --> CUE
+        CE --> CDE
     end
 
-    subgraph "稽核核心"
-        ASP["AuditAspect<br/>AOP 攔截器"]
-        CTX["AuditContext<br/>稽核事件資料"]
+    subgraph "Application Layer"
+        SVC["ContactService"]
+        DEP["DomainEventPublisher<br/>(Output Port)"]
     end
 
-    subgraph "擴展點 (Interfaces)"
-        AE["AuditableEntity<br/>實體自描述介面"]
-        ADE["AuditDataExtractor<br/>資料萃取器"]
-        AEH["AuditEventHandler<br/>事件處理器"]
+    subgraph "Infrastructure Layer"
+        SDEP["SpringDomainEventPublisher"]
+        AEL["AuditEventListener"]
+        DB[(Database)]
     end
 
-    subgraph "預設實作"
-        CAE["ContactAuditDataExtractor"]
-        DAH["DatabaseAuditEventHandler"]
-    end
+    SVC --> DEP
+    DEP -.->|implements| SDEP
+    SDEP --> AEL
+    AEL --> DB
 
-    subgraph "儲存層"
-        DB[(Database<br/>audit_logs)]
-    end
+    SVC --> CCE
+    SVC --> CUE
+    SVC --> CDE
 
-    SVC --> ASP
-    ASP --> CTX
-    ASP --> AE
-    ASP --> ADE
-    ASP --> AEH
-
-    CAE -.->|implements| ADE
-    DAH -.->|implements| AEH
-
-    AEH --> DAH
-    DAH --> DB
-
-    style ASP fill:#FFB6C1
-    style CTX fill:#87CEEB
-    style AE fill:#90EE90
-    style ADE fill:#90EE90
-    style AEH fill:#90EE90
+    style DE fill:#DDA0DD
+    style SVC fill:#FFB6C1
+    style DEP fill:#90EE90
+    style AEL fill:#87CEEB
 ```
 
-### 核心元件說明
+### 元件說明
 
-| 元件 | 類型 | 說明 |
+| 元件 | 位置 | 說明 |
 |------|------|------|
-| `@Auditable` | Annotation | 標註需要稽核的方法 |
-| `AuditAspect` | AOP Aspect | 攔截標註方法，自動記錄前後狀態 |
-| `AuditContext` | Record | 封裝稽核事件資料 |
-| `AuditableEntity` | Interface | 實體自描述介面（可選） |
-| `AuditDataExtractor` | Interface | 自訂資料萃取邏輯 |
-| `AuditEventHandler` | Interface | 自訂事件處理邏輯 |
+| `DomainEvent` | domain/event | 領域事件基底類別 |
+| `ContactCreatedEvent` | domain/event | 聯絡人建立事件 |
+| `ContactUpdatedEvent` | domain/event | 聯絡人更新事件 |
+| `ContactDeletedEvent` | domain/event | 聯絡人刪除事件 |
+| `DomainEventPublisher` | application/port/out | 事件發布器介面 (輸出埠) |
+| `SpringDomainEventPublisher` | infrastructure/event | Spring 事件發布器實作 |
+| `AuditEventListener` | infrastructure/event | 稽核事件監聽器 |
 
-### 快速開始：為實體添加稽核
+### 快速開始：為新實體添加稽核
 
-#### 方式一：實作 AuditableEntity 介面（推薦）
+#### 步驟 1：定義領域事件
 
 ```java
-public class Order implements AuditableEntity {
-    private Long id;
-    private String orderNumber;
-    private BigDecimal amount;
+// 基底事件
+public abstract class OrderEvent extends DomainEvent {
+    private final Long orderId;
+    private final Map<String, Object> snapshot;
 
-    @Override
-    public String getEntityType() {
-        return "Order";
+    protected OrderEvent(Order order) {
+        this.orderId = order.getId();
+        this.snapshot = createSnapshot(order);
     }
 
-    @Override
-    public Long getEntityId() {
-        return id;
-    }
+    // getters...
+}
 
-    @Override
-    public Object toAuditSnapshot() {
-        return Map.of(
-            "id", id,
-            "orderNumber", orderNumber,
-            "amount", amount
-        );
+// 具體事件
+public class OrderCreatedEvent extends OrderEvent {
+    public OrderCreatedEvent(Order order) {
+        super(order);
+    }
+}
+
+public class OrderUpdatedEvent extends OrderEvent {
+    private final Map<String, Object> beforeSnapshot;
+
+    public OrderUpdatedEvent(Order order, Map<String, Object> beforeSnapshot) {
+        super(order);
+        this.beforeSnapshot = beforeSnapshot;
     }
 }
 ```
 
-#### 方式二：實作 AuditDataExtractor（適用於無法修改的實體）
-
-```java
-@Component
-public class OrderAuditDataExtractor implements AuditDataExtractor {
-
-    @Override
-    public boolean supports(Class<?> entityClass) {
-        return Order.class.isAssignableFrom(entityClass);
-    }
-
-    @Override
-    public Optional<Long> extractEntityId(Object entity) {
-        if (entity instanceof Order order) {
-            return Optional.ofNullable(order.getId());
-        }
-        return Optional.empty();
-    }
-
-    @Override
-    public Object createSnapshot(Object entity) {
-        if (entity instanceof Order order) {
-            return Map.of(
-                "id", order.getId(),
-                "orderNumber", order.getOrderNumber(),
-                "amount", order.getAmount()
-            );
-        }
-        return entity;
-    }
-
-    @Override
-    public String getEntityType(Object entity) {
-        return "Order";
-    }
-}
-```
-
-#### 在 Service 方法上加入稽核標註
+#### 步驟 2：在 Service 發布事件
 
 ```java
 @Service
 @Transactional
 public class OrderService {
 
-    @Auditable(operation = OperationType.CREATE)
+    private final OrderRepository orderRepository;
+    private final DomainEventPublisher eventPublisher;
+
     public Order createOrder(CreateOrderCommand command) {
-        // 實作邏輯
+        Order order = Order.create(command);
+        Order savedOrder = orderRepository.save(order);
+
+        // 發布領域事件 - Service 不知道誰會處理這個事件
+        eventPublisher.publish(new OrderCreatedEvent(savedOrder));
+
+        return savedOrder;
     }
 
-    @Auditable(operation = OperationType.UPDATE, entityType = "Order")
     public Order updateOrder(UpdateOrderCommand command) {
-        // 實作邏輯
-    }
+        Order order = orderRepository.findById(command.id())
+            .orElseThrow(() -> new OrderNotFoundException(command.id()));
 
-    @Auditable(operation = OperationType.DELETE, entityType = "Order")
-    public void deleteOrder(OrderId id) {
-        // 實作邏輯
-    }
-}
-```
+        Map<String, Object> beforeSnapshot = createSnapshot(order);
+        order.update(command);
+        Order updatedOrder = orderRepository.save(order);
 
-### @Auditable 參數說明
+        eventPublisher.publish(new OrderUpdatedEvent(updatedOrder, beforeSnapshot));
 
-| 參數 | 類型 | 預設值 | 說明 |
-|------|------|--------|------|
-| `operation` | OperationType | (必填) | 操作類型：CREATE、READ、UPDATE、DELETE |
-| `entityType` | String | "" | 實體類型名稱，空字串時自動推斷 |
-| `captureBeforeState` | boolean | true | 是否記錄操作前狀態 |
-| `captureAfterState` | boolean | true | 是否記錄操作後狀態 |
-| `continueOnAuditFailure` | boolean | true | 稽核失敗時是否繼續執行操作 |
-
-### 自訂事件處理器
-
-預設使用 `DatabaseAuditEventHandler` 將稽核日誌存入資料庫。您可以實作自訂處理器：
-
-#### 範例：Kafka 事件處理器
-
-```java
-@Component
-public class KafkaAuditEventHandler implements AuditEventHandler {
-
-    private final KafkaTemplate<String, AuditContext> kafkaTemplate;
-
-    public KafkaAuditEventHandler(KafkaTemplate<String, AuditContext> kafkaTemplate) {
-        this.kafkaTemplate = kafkaTemplate;
-    }
-
-    @Override
-    public void handle(AuditContext context) {
-        kafkaTemplate.send("audit-events", context);
-    }
-
-    @Override
-    public int getOrder() {
-        return 0; // 優先於資料庫處理器
-    }
-
-    @Override
-    public boolean supports(String entityType) {
-        // 只處理特定實體類型
-        return "Order".equals(entityType);
+        return updatedOrder;
     }
 }
 ```
 
-#### 範例：非同步 Spring Event 處理器
+#### 步驟 3：建立事件監聽器
 
 ```java
 @Component
-public class AsyncAuditEventHandler implements AuditEventHandler {
+public class OrderAuditEventListener {
 
-    private final ApplicationEventPublisher eventPublisher;
+    private final AuditLogRepository auditLogRepository;
+    private final ObjectMapper objectMapper;
 
-    @Override
-    public void handle(AuditContext context) {
-        eventPublisher.publishEvent(new AuditApplicationEvent(context));
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void onOrderCreated(OrderCreatedEvent event) {
+        AuditLog auditLog = AuditLog.create(
+            event.getOrderId(),
+            OperationType.CREATE,
+            null,
+            toJson(event.getSnapshot())
+        );
+        auditLogRepository.save(auditLog);
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void onOrderUpdated(OrderUpdatedEvent event) {
+        AuditLog auditLog = AuditLog.create(
+            event.getOrderId(),
+            OperationType.UPDATE,
+            toJson(event.getBeforeSnapshot()),
+            toJson(event.getSnapshot())
+        );
+        auditLogRepository.save(auditLog);
     }
 }
+```
 
+### @TransactionalEventListener 參數
+
+| 參數 | 說明 |
+|------|------|
+| `BEFORE_COMMIT` | 在交易提交前執行（同一交易） |
+| `AFTER_COMMIT` | 在交易提交後執行（新交易） |
+| `AFTER_ROLLBACK` | 在交易回滾後執行 |
+| `AFTER_COMPLETION` | 在交易完成後執行（無論成功或失敗） |
+
+### 進階用法
+
+#### 非同步處理
+
+```java
 @Component
-public class AuditApplicationEventListener {
+public class AsyncAuditEventListener {
 
     @Async
-    @EventListener
-    public void onAuditEvent(AuditApplicationEvent event) {
-        // 非同步處理稽核事件
-        // 可以發送到外部系統、寫入檔案等
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onContactCreated(ContactCreatedEvent event) {
+        // 非同步處理，不阻塞主交易
+        // 適合發送通知、同步到外部系統等
     }
 }
 ```
 
-### 稽核模組檔案結構
+#### 多個監聽器
+
+```java
+// 稽核日誌
+@Component
+public class AuditEventListener {
+    @TransactionalEventListener
+    public void onContactCreated(ContactCreatedEvent event) {
+        // 寫入稽核日誌
+    }
+}
+
+// 通知服務
+@Component
+public class NotificationEventListener {
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onContactCreated(ContactCreatedEvent event) {
+        // 發送通知
+    }
+}
+
+// 搜尋索引
+@Component
+public class SearchIndexEventListener {
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onContactCreated(ContactCreatedEvent event) {
+        // 更新搜尋索引
+    }
+}
+```
+
+### 檔案結構
 
 ```
-src/main/java/com/example/contact/infrastructure/
-├── audit/                              # 稽核模組核心
-│   ├── Auditable.java                  # 稽核標註
-│   ├── AuditContext.java               # 稽核上下文（Value Object）
-│   ├── AuditableEntity.java            # 可稽核實體介面
-│   ├── AuditDataExtractor.java         # 資料萃取器介面
-│   ├── AuditEventHandler.java          # 事件處理器介面
-│   ├── DatabaseAuditEventHandler.java  # 預設資料庫處理器
-│   └── ContactAuditDataExtractor.java  # Contact 專用萃取器
-└── aspect/
-    └── AuditAspect.java                # AOP 攔截切面
-```
-
-### 處理順序
-
-當多個擴展實作存在時，系統依據 `getOrder()` 方法返回值決定優先順序：
-
-```
-數字越小 → 優先度越高
-
-AuditDataExtractor 執行順序：
-  1. ContactAuditDataExtractor (order=0) ← 優先
-  2. DefaultExtractor (order=100)
-
-AuditEventHandler 執行順序：
-  1. KafkaAuditEventHandler (order=0) ← 優先
-  2. DatabaseAuditEventHandler (order=MAX_VALUE)
+src/main/java/com/example/contact/
+├── domain/
+│   └── event/                              # 領域事件
+│       ├── DomainEvent.java                # 事件基底類別
+│       ├── ContactEvent.java               # Contact 事件基底
+│       ├── ContactCreatedEvent.java        # 建立事件
+│       ├── ContactUpdatedEvent.java        # 更新事件
+│       └── ContactDeletedEvent.java        # 刪除事件
+├── application/
+│   └── port/out/
+│       └── DomainEventPublisher.java       # 事件發布器介面
+└── infrastructure/
+    └── event/
+        ├── SpringDomainEventPublisher.java # Spring 事件發布器
+        └── AuditEventListener.java         # 稽核事件監聽器
 ```
 
 ### 最佳實踐
 
-1. **選擇正確的擴展方式**
-   - 可修改實體 → 實作 `AuditableEntity`
-   - 無法修改實體 → 建立 `AuditDataExtractor`
+1. **事件命名**
+   - 使用過去式動詞：`Created`、`Updated`、`Deleted`
+   - 清楚表達「發生了什麼」
 
-2. **Snapshot 設計原則**
-   - 只包含對稽核有意義的欄位
-   - 避免包含敏感資訊（密碼、token 等）
-   - 使用 Map 或專用 Record 類別
+2. **事件內容**
+   - 包含足夠資訊讓監聽器能獨立處理
+   - 避免在事件中包含複雜物件參照
 
-3. **錯誤處理**
-   - 預設 `continueOnAuditFailure=true`，稽核失敗不影響業務操作
-   - 關鍵操作可設為 `false`，確保稽核成功才繼續
+3. **交易策略**
+   - 稽核日誌：`BEFORE_COMMIT`（確保一致性）
+   - 通知/索引：`AFTER_COMMIT`（避免虛假通知）
 
-4. **效能考量**
-   - 使用非同步處理器處理大量稽核事件
-   - 考慮批次寫入或 Message Queue
+4. **錯誤處理**
+   - `BEFORE_COMMIT` 失敗會導致整個交易回滾
+   - `AFTER_COMMIT` 失敗不影響主交易
+
+5. **效能考量**
+   - 長時間操作使用 `@Async`
+   - 大量事件考慮批次處理
 
 ## 授權
 
